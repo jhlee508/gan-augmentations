@@ -19,8 +19,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+from torch.utils.tensorboard import SummaryWriter
+import torchvision
+
 
 os.makedirs("images", exist_ok=True)
+os.makedirs("t-sne", exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
@@ -34,27 +38,44 @@ parser.add_argument("--img_size", type=int, default=32, help="size of each image
 parser.add_argument("--channels", type=int, default=1, help="number of image channels")
 parser.add_argument("--sample_interval", type=int, default=400, help="interval between image sampling")
 parser.add_argument("--batch_interval", type=int, default=1, help="printing interval of batch sizes")
-# TODO
 parser.add_argument("--tSNE_interval", type=int, default=1000, help="printing interval of t-SNE")
+parser.add_argument("--tensorboard", type=str, default='off', help="writing Tensorboard")
 opt = parser.parse_args()
 print(opt)
 
 cuda = True if torch.cuda.is_available() else False
 
 
-def show_tsne(X_show): 
+def show_tsne(X_show_fake, X_show_real, batches_done): 
+
     tsne = TSNE(n_components=2) 
-    X_show = X_show.reshape(X_show.shape[0], -1)
-    X = tsne.fit_transform(X_show.cpu().detach().numpy()) 
-    df = pd.DataFrame(X, columns=['x', 'y'])
-    df['x'] = X[:,0]
-    df['y'] = X[:,1]
+
+    X_show_fake = X_show_fake.reshape(X_show_fake.shape[0], -1)
+    X_show_real = X_show_real.reshape(X_show_real.shape[0], -1)
+
+    X_fake = tsne.fit_transform(X_show_fake.cpu().detach().numpy()) 
+    X_real = tsne.fit_transform(X_show_real.cpu().detach().numpy()) 
+
+    df1 = pd.DataFrame(X_fake, columns=['x', 'y'])
+    df2 = pd.DataFrame(X_real, columns=['x', 'y'])
+
+    df1['x'] = X_fake[:,0]
+    df1['y'] = X_fake[:,1]
+    df2['x'] = X_real[:,0]
+    df2['y'] = X_real[:,1]
+
     fig = plt.figure(figsize=(8, 6), dpi=80) 
     ax = fig.add_subplot(1, 1, 1) 
-    ax.scatter(df['x'], df['y']) 
+    fake = ax.scatter(df1['x'], df1['y'], marker='x', color='r') 
+    real = ax.scatter(df2['x'], df2['y'], marker='o', color='b') 
     plt.xlabel("t-SNE feature 0") 
-    plt.ylabel("t-SNE feature 1") 
-    plt.savefig('t-sne.png')
+    plt.ylabel("t-SNE feature 1")
+    plt.legend(
+        (fake, real),
+        ('fake data', 'real data'),
+        loc='upper right'
+    )
+    plt.savefig('t-sne/%d.png' % batches_done)
 
 
 def weights_init_normal(m):
@@ -164,6 +185,11 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 #  Training
 # ----------
 
+# Tensorboard writer
+step = 0
+writer_fake = SummaryWriter(f"runs/DCGAN/fake")
+writer_real= SummaryWriter(f"runs/DCGAN/real")
+
 for epoch in range(opt.n_epochs + 1):
     for i, (imgs, _) in enumerate(dataloader):
 
@@ -218,3 +244,17 @@ for epoch in range(opt.n_epochs + 1):
 
         if batches_done % opt.tSNE_interval == 0:
             # t-sne TODO 
+            show_tsne(gen_imgs, real_imgs, batches_done)
+
+        if opt.tensorboard == "on":
+        # Writing Tensorboard
+            img_grid_fake = torchvision.utils.make_grid(gen_imgs, normalize=True)
+            img_grid_real = torchvision.utils.make_grid(real_imgs, normalize=True)
+
+            writer_fake.add_image(
+                "Mnist Fake Images", img_grid_fake, global_step=step
+            )
+            writer_real.add_image(
+                "Mnist Real Images", img_grid_real, global_step=step
+            )
+            step += 1
